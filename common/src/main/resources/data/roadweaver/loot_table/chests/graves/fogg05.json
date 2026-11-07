@@ -1,0 +1,98 @@
+{
+  "type": "minecraft:chest",
+  "pools": [
+    {
+      "rolls": 1,
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:recovery_compass"
+        }
+      ],
+      "condition": {
+        "chance": 0.05,
+        "type": "minecraft:random_chance"
+      }
+    },
+    {
+      "rolls": {
+        "type": "minecraft:binomial",
+        "n": 5,
+        "p": 0.5
+      },
+      "bonus_rolls": 0.1,
+      "entries": [
+        {
+          "type": "minecraft:tag",
+          "expand": true,
+          "modifier": [
+            {
+              "count": {
+                "type": "minecraft:uniform",
+                "min": 1,
+                "max": 4
+              },
+              "type": "minecraft:set_count"
+            }
+          ],
+          "items": "#roadweaver:dyes"
+        }
+      ]
+    },
+    {
+      "rolls": {
+        "type": "minecraft:binomial",
+        "n": 6,
+        "p": 0.6
+      },
+      "bonus_rolls": 0.1,
+      "entries": [
+        {
+          "type": "minecraft:tag",
+          "expand": true,
+          "quality": 0.2,
+          "items": "#minecraft:terracotta"
+        },
+        {
+          "type": "minecraft:tag",
+          "expand": true,
+          "quality": 0.2,
+          "items": "#roadweaver:glazed_terracotta"
+        },
+        {
+          "type": "minecraft:tag",
+          "expand": true,
+          "weight": 2,
+          "items": "#roadweaver:stained_glass"
+        },
+        {
+          "type": "minecraft:tag",
+          "expand": true,
+          "weight": 3,
+          "items": "#minecraft:wool"
+        },
+        {
+          "type": "minecraft:tag",
+          "expand": true,
+          "weight": 2,
+          "items": "#minecraft:wool_carpets"
+        },
+        {
+          "type": "minecraft:item",
+          "name": "minecraft:amethyst_shard",
+          "quality": 0.2,
+          "modifier": [
+            {
+              "count": {
+                "type": "minecraft:binomial",
+                "n": 4,
+                "p": 0.25
+              },
+              "type": "minecraft:set_count"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

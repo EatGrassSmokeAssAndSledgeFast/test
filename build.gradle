@@ -1,0 +1,90 @@
+// 负责多模块工程的公共构建配置、仓库与运行时工具链约束。
+plugins {
+	id 'architectury-plugin' version '3.5.169'
+	id 'dev.architectury.loom-no-remap' version '1.17-SNAPSHOT' apply false
+}
+
+architectury {
+	minecraft = '26.3'
+}
+
+allprojects {
+	apply plugin: 'java'
+	apply plugin: 'architectury-plugin'
+
+	group = 'net.shiroha233.roadweaver'
+	version = '2.3.0-26.3'
+
+	repositories {
+		maven { url = 'https://maven.architectury.dev/' }
+		maven { url = 'https://maven.fabricmc.net/' }
+		maven { url = 'https://maven.shedaniel.me/' }
+		maven { url = 'https://maven.terraformersmc.com/' }
+		exclusiveContent {
+			forRepository {
+				maven {
+					name = 'CurseMaven'
+					url = 'https://cursemaven.com'
+				}
+			}
+			filter {
+				includeGroup 'curse.maven'
+			}
+		}
+		exclusiveContent {
+			forRepository {
+				maven {
+					name = 'Modrinth'
+					url = 'https://api.modrinth.com/maven'
+				}
+			}
+			filter {
+				includeGroup 'maven.modrinth'
+			}
+		}
+		mavenCentral()
+	}
+
+	tasks.withType(JavaCompile).configureEach {
+		options.encoding = 'UTF-8'
+		options.release = 25
+	}
+
+	def runtimeJavaVersion = Integer.parseInt(rootProject.findProperty('runtime_java_version')?.toString() ?: '25')
+
+	java {
+		toolchain {
+			languageVersion = JavaLanguageVersion.of(25)
+		}
+		withSourcesJar()
+	}
+
+	// Gradle toolchains 只影响编译任务，开发运行需要显式指定启动器。
+	tasks.withType(JavaExec).configureEach {
+		javaLauncher = javaToolchains.launcherFor {
+			languageVersion = JavaLanguageVersion.of(runtimeJavaVersion)
+		}
+		systemProperty 'minecraft.username', rootProject.properties.getOrDefault('minecraft_username', 'Player')
+	}
+}
+
+subprojects {
+	apply plugin: 'dev.architectury.loom-no-remap'
+
+	base {
+		archivesName = "${rootProject.name}-${project.name}"
+	}
+
+
+	dependencies {
+		minecraft "com.mojang:minecraft:26.3"
+	}
+
+	// Fabric 开发运行时追加固定用户名，便于复现和调试。
+	if (project.name == 'fabric') {
+		tasks.named('runClient', JavaExec).configure {
+			def username = rootProject.properties.getOrDefault('minecraft_username', 'Player')
+			args '--username', username
+		}
+	}
+}

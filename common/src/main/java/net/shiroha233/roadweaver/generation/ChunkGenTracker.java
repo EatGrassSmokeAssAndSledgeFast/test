@@ -1,0 +1,48 @@
+package net.shiroha233.roadweaver.generation;
+
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.WorldGenRegion;
+import net.minecraft.world.level.WorldGenLevel;
+
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * 鍖哄潡鐢熸垚闃舵杩借釜鍣紝浠呭湪棣栨涓栫晫鐢熸垚闃舵闃绘嫤鏍戞湪鏀剧疆
+ */
+public final class ChunkGenTracker {
+    private ChunkGenTracker() {}
+
+    private static final Set<String> GENERATING_CHUNKS = ConcurrentHashMap.newKeySet();
+
+    public static boolean isWorldGenPhase(WorldGenLevel level) {
+        return level instanceof WorldGenRegion;
+    }
+
+    @SuppressWarnings("deprecation")
+    public static ServerLevel extractServerLevel(WorldGenLevel level) {
+        if (level instanceof ServerLevel sl) {
+            return sl;
+        }
+        if (level instanceof WorldGenRegion region) {
+            return region.getLevel();
+        }
+        return null;
+    }
+
+    public static void markGenerating(ServerLevel level, int chunkX, int chunkZ) {
+        GENERATING_CHUNKS.add(makeKey(level, chunkX, chunkZ));
+    }
+
+    public static void markComplete(ServerLevel level, int chunkX, int chunkZ) {
+        GENERATING_CHUNKS.remove(makeKey(level, chunkX, chunkZ));
+    }
+
+    public static void clearAll() {
+        GENERATING_CHUNKS.clear();
+    }
+
+    private static String makeKey(ServerLevel level, int chunkX, int chunkZ) {
+        return level.dimension().identifier() + ":" + chunkX + "," + chunkZ;
+    }
+}

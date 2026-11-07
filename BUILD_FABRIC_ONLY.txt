@@ -1,0 +1,13 @@
+RoadWeaver 26.3 — Fabric-only build
+
+Requirements:
+- JDK 25 (JAVA_HOME and PATH configured)
+- Internet access for Gradle and Maven dependency downloads
+
+Build from this directory:
+  .\gradlew.bat clean :fabric:build
+
+Expected release artifact:
+  fabric\build\libs\roadweaver-fabric-2.3.0-26.3.jar
+
+This distribution intentionally excludes NeoForge.

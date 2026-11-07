@@ -1,0 +1,678 @@
+package net.shiroha233.roadweaver.client.map;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.Level;
+import net.shiroha233.roadweaver.client.map.data.ClientMapNotes;
+import net.shiroha233.roadweaver.client.map.data.MapDataCollector;
+import net.shiroha233.roadweaver.client.map.data.MapSnapshot;
+import net.shiroha233.roadweaver.client.map.data.MapSnapshotCache;
+import net.shiroha233.roadweaver.client.map.interaction.MapInteraction;
+import net.shiroha233.roadweaver.client.map.render.GridRenderer;
+import net.shiroha233.roadweaver.client.map.render.MapRenderers;
+import net.shiroha233.roadweaver.client.map.render.RenderUtils;
+import net.shiroha233.roadweaver.client.map.ui.ContextMenu;
+import net.shiroha233.roadweaver.client.map.ui.NoteEditScreen;
+import net.shiroha233.roadweaver.client.map.ui.SimpleTextInputScreen;
+import net.shiroha233.roadweaver.client.render.RoadWeaverScreen;
+import net.shiroha233.roadweaver.client.render.ScreenBackgrounds;
+import net.shiroha233.roadweaver.core.model.ConnectionStatus;
+import net.shiroha233.roadweaver.core.model.StructureConnection;
+import net.shiroha233.roadweaver.helpers.LevelCompat;
+import net.shiroha233.roadweaver.helpers.PermissionCompat;
+import net.shiroha233.roadweaver.map.permission.MapAccessService;
+import net.shiroha233.roadweaver.network.ClientNetBridge;
+import net.shiroha233.roadweaver.util.ComputeService;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+/**
+ * 道路地图界面
+ */
+public class RoadMapScreen extends RoadWeaverScreen implements MapInputHandler.Callbacks {
+    private static final Identifier MAP_TEXTURE = Identifier.fromNamespaceAndPath("roadweaver", "textures/gui/map.png");
+    private static final double INITIAL_SNAPSHOT_MARGIN_FACTOR = 1.12D;
+    
+    // 翻译�?
+    private static final Component BTN_CONFIG = Component.translatable("gui.roadweaver.config_button");
+    private static final Component BTN_MANUAL = Component.translatable("gui.roadweaver.map.manual_connect");
+    private static final Component MENU_TELEPORT = Component.translatable("gui.roadweaver.map.menu.teleport");
+    private static final Component MENU_SET_ALIAS = Component.translatable("gui.roadweaver.map.menu.set_alias");
+    private static final Component MENU_EDIT_NOTE = Component.translatable("gui.roadweaver.map.menu.edit_note");
+    private static final Component DIALOG_ALIAS_TITLE = Component.translatable("gui.roadweaver.map.dialog.alias_title");
+
+    // 数据
+    private MapSnapshot snapshot = MapSnapshot.empty();
+    private Identifier currentDimensionId;
+    
+    // 组件
+    private final MapState state = new MapState();
+    private final MapView view = new MapView();
+    private final MapInputHandler inputHandler;
+    private final ContextMenu contextMenu = new ContextMenu();
+    
+    // 布局
+    private int mapX, mapY, mapW, mapH;
+
+    public RoadMapScreen() {
+        super(Component.translatable("gui.roadweaver.map.title"));
+        this.inputHandler = new MapInputHandler(state, view, this);
+    }
+
+    // ========== 生命周期 ==========
+    
+    @Override
+    protected void init() {
+        super.init();
+        if (!hasMapOpenPermission()) {
+            denyMapAccessAndClose();
+            return;
+        }
+        MapSnapshotCache.cancelClear();
+        Minecraft mc = this.minecraft;
+        if (mc != null && mc.level != null) {
+            currentDimensionId = mc.level.dimension().identifier();
+            MapSnapshot cached = MapSnapshotCache.peek(currentDimensionId);
+            if (cached != null) {
+                this.snapshot = cached;
+            }
+        }
+        computeMapRect();
+        inputHandler.updateLayout(mapX, mapY, mapW, mapH, MapTheme.INNER_PADDING);
+
+        initializeView(mc);
+        onRequestView();
+    }
+
+    @Override
+    public void removed() {
+        super.removed();
+        MapSnapshotCache.scheduleClear(1000);
+    }
+
+    @Override
+    public boolean isPauseScreen() {
+        return false;
+    }
+
+    // ========== 渲染 ==========
+    
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+        ScreenBackgrounds.render(g, this.width, this.height);
+        
+        // 地图纹理
+        g.blit(RenderPipelines.GUI_TEXTURED, MAP_TEXTURE, mapX, mapY, 0.0F, 0.0F,
+               mapW, mapH,
+               MapTheme.TEX_WIDTH, MapTheme.TEX_HEIGHT,
+               MapTheme.TEX_WIDTH, MapTheme.TEX_HEIGHT);
+
+        // 标题
+        int titleY = mapY - 8;
+        g.centeredText(this.font, this.getTitle(), this.width / 2, Math.max(6, titleY), MapTheme.COLOR_TEXT);
+
+        int contentW = mapW - MapTheme.INNER_PADDING * 2;
+        int contentH = mapH - MapTheme.INNER_PADDING * 2;
+        view.lockAspect(contentW, contentH);
+
+        int left = mapX + MapTheme.INNER_PADDING;
+        int top = mapY + MapTheme.INNER_PADDING;
+        int right = mapX + mapW - MapTheme.INNER_PADDING;
+        int bottom = mapY + mapH - MapTheme.INNER_PADDING;
+        
+        g.enableScissor(left, top, right, bottom);
+        
+        // 网格
+        MapRenderers.renderGrid(g, this.font, mapX, mapY, mapW, mapH, MapTheme.INNER_PADDING,
+                view.getMinX(), view.getMaxX(), view.getMinZ(), view.getMaxZ(), 
+                MapTheme.COLOR_GRID, MapTheme.GRID_TARGET_PX, MapTheme.COLOR_TEXT);
+
+        int thickness = computeThickness();
+
+        // 道路折线�?LOD：缩放较远时不绘制折线，改用连接直线（避�?只剩细节线段"导致层级渲染失效）�?
+        int lodStep = GridRenderer.computeGridStep(mapX, mapY, mapW, mapH, MapTheme.INNER_PADDING,
+                view.getMinX(), view.getMaxX(), view.getMinZ(), view.getMaxZ(), MapTheme.GRID_TARGET_PX);
+        boolean renderRoadPolylines = !snapshot.roadPolylines().isEmpty() && lodStep <= 256;
+        
+        // 连接线（排除已完成的，因为会用道路折线表示）
+        List<StructureConnection> connForLines = new ArrayList<>(snapshot.connections());
+        if (renderRoadPolylines) {
+            connForLines.removeIf(c -> c.status() == ConnectionStatus.COMPLETED);
+        }
+        MapRenderers.renderConnections(g, connForLines,
+                (x1, z1, x2, z2) -> view.segmentInViewWorld(x1, z1, x2, z2),
+                v -> view.toScreenX(v, mapX, MapTheme.INNER_PADDING, contentW),
+                v -> view.toScreenY(v, mapY, MapTheme.INNER_PADDING, contentH),
+                thickness,
+                MapTheme.COLOR_PLANNED, MapTheme.COLOR_GENERATING, 
+                MapTheme.COLOR_COMPLETED, MapTheme.COLOR_FAILED,
+                left, top, right, bottom);
+
+        // 道路折线
+        if (renderRoadPolylines) {
+            MapRenderers.renderRoadPolylines(g, snapshot.roadPolylines(),
+                    (x1, z1, x2, z2) -> view.segmentInViewWorld(x1, z1, x2, z2),
+                    v -> view.toScreenX(v, mapX, MapTheme.INNER_PADDING, contentW),
+                    v -> view.toScreenY(v, mapY, MapTheme.INNER_PADDING, contentH),
+                    thickness, MapTheme.COLOR_COMPLETED,
+                    left, top, right, bottom, lodStep);
+        }
+
+        // 结构�?
+        MapRenderers.renderStructures(g, snapshot.structures(),
+                v -> view.toScreenX(v, mapX, MapTheme.INNER_PADDING, contentW),
+                v -> view.toScreenY(v, mapY, MapTheme.INNER_PADDING, contentH),
+                (x, z) -> view.isInViewWorld(x, z),
+                computePointSize(), MapTheme.COLOR_STRUCTURE,
+                left, top, right, bottom);
+
+        // 手动连接模式的预�?
+        renderManualModePreview(g, mouseX, mouseY, contentW, contentH, left, top, right, bottom);
+
+        // 悬停高亮
+        if (!contextMenu.isOpen()) {
+            MapInteraction.renderHoverHighlight(g, snapshot, view, mapX, mapY, mapW, mapH,
+                    MapTheme.INNER_PADDING, mouseX, mouseY);
+        }
+
+        // 玩家箭头
+        renderPlayer(g, contentW, contentH, left, top, right, bottom);
+        
+        g.disableScissor();
+
+        // 图例
+        int legendRight = mapX + mapW - MapTheme.INNER_PADDING;
+        int legendStartY = mapY + MapTheme.INNER_PADDING + 8;
+        MapRenderers.renderLegend(g, this.font, legendRight, legendStartY, 8,
+                MapTheme.COLOR_TEXT, MapTheme.COLOR_STRUCTURE, 
+                MapTheme.COLOR_PLANNED, MapTheme.COLOR_GENERATING, 
+                MapTheme.COLOR_COMPLETED, MapTheme.COLOR_FAILED,
+                snapshot.structuresCount(), snapshot.plannedCount(), 
+                snapshot.generatingCount(), snapshot.completedCount(), snapshot.failedCount());
+
+        // 工具栏按�?
+        renderToolbarButtons(g, mouseX, mouseY);
+
+        // 悬停提示
+        if (!contextMenu.isOpen()) {
+            MapInteraction.renderHoverTooltip(g, this.font, snapshot, view, mapX, mapY, mapW, mapH,
+                    MapTheme.INNER_PADDING, mouseX, mouseY);
+        }
+
+        // 缩放防抖检�?
+        if (state.isZoomDebounceReady()) {
+            state.clearZoomDebounce();
+            onRequestView();
+        }
+
+        // 右键菜单
+        contextMenu.render(g, this.font, mouseX, mouseY, this.width, this.height);
+
+        super.extractRenderState(g, mouseX, mouseY, partialTick);
+    }
+
+    private void renderManualModePreview(GuiGraphicsExtractor g, int mouseX, int mouseY,
+                                         int contentW, int contentH,
+                                         int left, int top, int right, int bottom) {
+        if (!state.isManualMode() || !state.hasSelection()) return;
+        
+        BlockPos selectedA = state.getSelectedA();
+        if (!view.isInViewWorld(selectedA.getX(), selectedA.getZ())) return;
+        
+        int sxA = view.toScreenX(selectedA.getX(), mapX, MapTheme.INNER_PADDING, contentW);
+        int syA = view.toScreenY(selectedA.getZ(), mapY, MapTheme.INNER_PADDING, contentH);
+        int selSize = computePointSize() * 2 + 4;
+        RenderUtils.drawPoint(g, sxA, syA, selSize, MapTheme.COLOR_SELECTED, left, top, right, bottom);
+
+        if (inputHandler.insideMap(mouseX, mouseY)) {
+            int sxB, syB;
+            BlockPos hover = inputHandler.findNearestStructure(snapshot, mouseX, mouseY);
+            if (hover != null && view.isInViewWorld(hover.getX(), hover.getZ())) {
+                sxB = view.toScreenX(hover.getX(), mapX, MapTheme.INNER_PADDING, contentW);
+                syB = view.toScreenY(hover.getZ(), mapY, MapTheme.INNER_PADDING, contentH);
+            } else {
+                sxB = mouseX;
+                syB = mouseY;
+            }
+            RenderUtils.drawThickDashedLine(g, sxA, syA, sxB, syB,
+                    MapTheme.COLOR_PREVIEW_LINE, computeThickness(),
+                    MapTheme.DASH_LENGTH, MapTheme.DASH_GAP,
+                    left, top, right, bottom);
+        }
+    }
+
+    private void renderPlayer(GuiGraphicsExtractor g, int contentW, int contentH,
+                              int left, int top, int right, int bottom) {
+        if (this.minecraft == null || this.minecraft.player == null) return;
+        
+        double wx = this.minecraft.player.getX();
+        double wz = this.minecraft.player.getZ();
+        int sx = view.toScreenX((int) Math.round(wx), mapX, MapTheme.INNER_PADDING, contentW);
+        int sy = view.toScreenY((int) Math.round(wz), mapY, MapTheme.INNER_PADDING, contentH);
+        
+        if (!inputHandler.insideMap(sx, sy)) return;
+        
+        float yaw = this.minecraft.player.getYRot();
+        MapRenderers.drawPlayerArrow(g, sx, sy, yaw,
+                MapTheme.PLAYER_ARROW_TIP_LEN, MapTheme.PLAYER_ARROW_BASE_LEN, 
+                MapTheme.PLAYER_ARROW_HALF_WIDTH, MapTheme.COLOR_PLAYER_ARROW,
+                left, top, right, bottom,
+                view.pxPerBlockX(contentW), view.pxPerBlockZ(contentH));
+    }
+
+    private void renderToolbarButtons(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        // 配置按钮（左上角�?
+        int[] configBtn = computeConfigBtnBounds();
+        renderTextButton(g, BTN_CONFIG, configBtn, mouseX, mouseY);
+
+        // 手动连接按钮（左下角�?
+        int[] manualBtn = computeManualBtnBounds();
+        Component manualLabel = Component.empty().append(BTN_MANUAL).append(": ")
+                .append(state.isManualMode() 
+                        ? Component.translatable("gui.roadweaver.common.on") 
+                        : Component.translatable("gui.roadweaver.common.off"));
+        renderTextButton(g, manualLabel, manualBtn, mouseX, mouseY);
+    }
+
+    private void renderTextButton(GuiGraphicsExtractor g, Component label, int[] bounds, int mouseX, int mouseY) {
+        int x = bounds[0], y = bounds[1], w = bounds[2], h = bounds[3];
+        int ty = y + (h - this.font.lineHeight) / 2;
+        g.text(this.font, label, x + 3, ty, MapTheme.COLOR_TEXT, false);
+        
+        if (insideRect(mouseX, mouseY, x, y, w, h)) {
+            int textW = this.font.width(label);
+            int uy = ty + this.font.lineHeight + 1;
+            int underline = (MapTheme.COLOR_TEXT & 0x00FFFFFF) | 0x60000000;
+            g.fill(x + 2, uy, x + 2 + textW + 2, uy + 1, underline);
+        }
+    }
+
+    // ========== 输入处理 ==========
+    
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        return inputHandler.mouseScrolled(mouseX, mouseY, scrollY)
+               || super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+    }
+
+    @Override
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        double mouseX = event.x();
+        double mouseY = event.y();
+        int button = event.button();
+        // 右键菜单点击
+        if (contextMenu.isOpen()) {
+            if (contextMenu.mouseClicked(mouseX, mouseY, button)) {
+                return true;
+            }
+        }
+        
+        // 工具栏按�?
+        if (button == 0) {
+            int[] configBtn = computeConfigBtnBounds();
+            if (insideRect(mouseX, mouseY, configBtn)) {
+                onOpenConfig();
+                return true;
+            }
+            int[] manualBtn = computeManualBtnBounds();
+            if (insideRect(mouseX, mouseY, manualBtn)) {
+                state.toggleManualMode();
+                return true;
+            }
+        }
+        
+        // 右键打开菜单
+        if (button == 1 && inputHandler.insideMap(mouseX, mouseY)) {
+            BlockPos target = inputHandler.findNearestStructure(snapshot, mouseX, mouseY);
+            if (target != null) {
+                openContextMenuFor(target, (int) mouseX, (int) mouseY);
+                return true;
+            }
+        }
+        
+        // 委托给输入处理器
+        return inputHandler.mouseClicked(mouseX, mouseY, button, snapshot,
+                computeConfigBtnBounds()[0], computeConfigBtnBounds()[1], 
+                computeConfigBtnBounds()[2], computeConfigBtnBounds()[3],
+                computeManualBtnBounds()[0], computeManualBtnBounds()[1],
+                computeManualBtnBounds()[2], computeManualBtnBounds()[3])
+               || super.mouseClicked(event, doubleClick);
+    }
+
+    @Override
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        double mouseX = event.x();
+        double mouseY = event.y();
+        int button = event.button();
+        return inputHandler.mouseDragged(mouseX, mouseY, button, dragX, dragY)
+               || super.mouseDragged(event, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(MouseButtonEvent event) {
+        double mouseX = event.x();
+        double mouseY = event.y();
+        int button = event.button();
+        return inputHandler.mouseReleased(mouseX, mouseY, button)
+               || super.mouseReleased(event);
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        return inputHandler.keyPressed(event, this.minecraft)
+               || super.keyPressed(event);
+    }
+
+    // ========== 回调实现 ==========
+    
+    @Override
+    public void onCloseScreen() {
+        this.onClose();
+    }
+
+    @Override
+    public void onOpenConfig() {
+        if (this.minecraft == null) return;
+        var p = this.minecraft.player;
+        if (p != null && this.minecraft.getSingleplayerServer() == null) {
+            // 多人游戏：配置修改应限制�?OP（服务端权限等级 2+�?
+            if (!PermissionCompat.hasCommandLevel2(p)) {
+                this.minecraft.gui.hud.setOverlayMessage(Component.translatable("gui.roadweaver.map.config.denied"), false);
+                return;
+            }
+        }
+        try {
+            Screen next = net.shiroha233.roadweaver.client.ConfigScreenFactory.createConfigScreen(this);
+            if (next != null) {
+                this.minecraft.gui.setScreen(next);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    @Override
+    public void onRequestView() {
+        if (!hasMapOpenPermission()) {
+            denyMapAccessAndClose();
+            return;
+        }
+        int minX = (int) Math.floor(Math.min(view.getMinX(), view.getMaxX())) - 32;
+        int maxX = (int) Math.ceil(Math.max(view.getMinX(), view.getMaxX())) + 32;
+        int minZ = (int) Math.floor(Math.min(view.getMinZ(), view.getMaxZ())) - 32;
+        int maxZ = (int) Math.ceil(Math.max(view.getMinZ(), view.getMaxZ())) + 32;
+
+        Minecraft mc = this.minecraft;
+        if (mc == null) return;
+
+        Identifier dimensionId = (mc.level != null) ? mc.level.dimension().identifier() : null;
+        if (dimensionId != null && (currentDimensionId == null || !dimensionId.equals(currentDimensionId))) {
+            currentDimensionId = dimensionId;
+            MapSnapshot cached = MapSnapshotCache.peek(currentDimensionId);
+            if (cached != null) {
+                this.snapshot = cached;
+            }
+        }
+        
+        MinecraftServer server = mc.getSingleplayerServer();
+        if (server != null) {
+            // 单人模式：本地构造快�?
+            ServerLevel level = null;
+            if (mc.level != null) {
+                level = server.getLevel(mc.level.dimension());
+            }
+            if (level != null) {
+                final ServerLevel levelFinal = level;
+                int cx = 0, cz = 0;
+                if (mc.player != null) {
+                    cx = (int) Math.round(mc.player.getX());
+                    cz = (int) Math.round(mc.player.getZ());
+                }
+                int radiusBlocks = getRadiusBlocks();
+                final int fcx = cx, fcz = cz;
+                final int fMinX = minX, fMaxX = maxX, fMinZ = minZ, fMaxZ = maxZ;
+                final int currentSeq = state.incrementAndGetRequestSeq();
+                
+                CompletableFuture
+                    .supplyAsync(() -> MapDataCollector.build(levelFinal, fMinX, fMinZ, fMaxX, fMaxZ, fcx, fcz, radiusBlocks), 
+                                 ComputeService.executor())
+                    .thenAccept(snap -> mc.execute(() -> {
+                        if (state.getCurrentRequestSeq() == currentSeq) {
+                            acceptSnapshot(currentSeq, levelFinal.dimension().identifier(), snap);
+                        }
+                    }));
+            }
+        } else {
+            // 多人模式：发送网络请�?
+            int requestSeq = state.incrementAndGetRequestSeq();
+            Identifier did = (mc.level != null) ? mc.level.dimension().identifier() : Identifier.fromNamespaceAndPath("minecraft", "overworld");
+            ClientNetBridge.requestSnapshot(requestSeq, did, minX, minZ, maxX, maxZ);
+        }
+    }
+
+    @Override
+    public void onTeleportTo(BlockPos pos) {
+        ClientNetBridge.requestTeleport(pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    @Override
+    public void onManualConnect(BlockPos a, BlockPos b) {
+        ClientNetBridge.requestManualConnect(a.getX(), a.getZ(), b.getX(), b.getZ());
+    }
+
+    @Override
+    public void onCenterToPlayer() {
+        if (this.minecraft == null || this.minecraft.player == null) return;
+        int contentW = mapW - MapTheme.INNER_PADDING * 2;
+        int contentH = mapH - MapTheme.INNER_PADDING * 2;
+        view.calibrateInitialToPlayer(this.minecraft, contentW, contentH, MapTheme.GRID_TARGET_PX);
+        onRequestView();
+    }
+
+    @Override
+    public void onCenterToSpawn() {
+        Minecraft mc = this.minecraft;
+        if (mc == null) return;
+        
+        BlockPos spawn = null;
+        MinecraftServer server = mc.getSingleplayerServer();
+        if (server != null) {
+            ServerLevel level = server.getLevel(Level.OVERWORLD);
+            if (level != null) {
+                spawn = LevelCompat.getWorldSpawnPos(level);
+            }
+        }
+        if (spawn == null && mc.level != null) {
+            spawn = LevelCompat.getWorldSpawnPos(mc.level);
+        }
+        if (spawn == null) return;
+        
+        int contentW = mapW - MapTheme.INNER_PADDING * 2;
+        int contentH = mapH - MapTheme.INNER_PADDING * 2;
+        view.centerOn(spawn.getX(), spawn.getZ(), contentW, contentH);
+        onRequestView();
+    }
+
+    // ========== 公共方法 ==========
+    
+    public void setSnapshot(MapSnapshot snapshot) {
+        if (snapshot != null) {
+            this.snapshot = snapshot;
+            if (currentDimensionId != null) {
+                MapSnapshotCache.put(currentDimensionId, snapshot);
+            }
+        }
+    }
+
+    public void acceptSnapshot(int requestSeq, Identifier dimensionId, MapSnapshot snapshot) {
+        if (dimensionId == null || snapshot == null) return;
+        if (requestSeq != state.getCurrentRequestSeq()) return;
+
+        // 如果客户端当前维度已变更，则丢弃过期回包，避免覆盖当前视�?
+        if (currentDimensionId != null && !dimensionId.equals(currentDimensionId)) return;
+
+        boolean shouldRefitView = !hasSnapshotData(this.snapshot) && hasSnapshotData(snapshot);
+        this.snapshot = snapshot;
+        MapSnapshotCache.put(dimensionId, snapshot);
+        if (shouldRefitView) {
+            initializeView(this.minecraft);
+        }
+    }
+
+    // ========== 辅助方法 ==========
+    
+    private void computeMapRect() {
+        int availW = this.width - MapTheme.OUTER_PADDING * 2;
+        int availH = this.height - MapTheme.OUTER_PADDING * 2;
+        float ratio = (float) MapTheme.TEX_WIDTH / MapTheme.TEX_HEIGHT;
+        int w = availW;
+        int h = Math.round(w / ratio);
+        if (h > availH) {
+            h = availH;
+            w = Math.round(h * ratio);
+        }
+        mapW = w;
+        mapH = h;
+        mapX = (this.width - w) / 2;
+        mapY = (this.height - h) / 2;
+    }
+
+    private void initializeView(Minecraft mc) {
+        int contentW = mapW - MapTheme.INNER_PADDING * 2;
+        int contentH = mapH - MapTheme.INNER_PADDING * 2;
+        view.resetFromSnapshot(snapshot);
+
+        if (hasSnapshotData(snapshot)) {
+            view.lockAspect(contentW, contentH);
+            double cx = (view.getMinX() + view.getMaxX()) * 0.5;
+            double cz = (view.getMinZ() + view.getMaxZ()) * 0.5;
+            view.applyZoomAround(cx, cz, INITIAL_SNAPSHOT_MARGIN_FACTOR, contentW, contentH, MapTheme.GRID_TARGET_PX);
+            return;
+        }
+
+        if (mc != null && mc.player != null) {
+            view.calibrateInitialToPlayer(mc, contentW, contentH, MapTheme.GRID_TARGET_PX);
+        }
+    }
+
+    private static boolean hasSnapshotData(MapSnapshot snapshot) {
+        return snapshot != null
+                && (snapshot.structuresCount() > 0
+                || !snapshot.connections().isEmpty()
+                || !snapshot.roadPolylines().isEmpty());
+    }
+
+    private int computeThickness() {
+        int contentW = mapW - MapTheme.INNER_PADDING * 2;
+        int contentH = mapH - MapTheme.INNER_PADDING * 2;
+        double ppb = Math.min(view.pxPerBlockX(contentW), view.pxPerBlockZ(contentH));
+        int t = (int) Math.round(ppb);
+        return Math.max(MapTheme.MIN_THICKNESS, Math.min(t, MapTheme.MAX_THICKNESS));
+    }
+
+    private int computePointSize() {
+        return MapTheme.BASE_POINT_SIZE + computeThickness();
+    }
+
+    private int getRadiusBlocks() {
+        try {
+            var cfg = net.shiroha233.roadweaver.config.ConfigService.get();
+            if (cfg.highway().enabled()) {
+                return Math.max(16, cfg.highway().planningRadiusBlocks());
+            } else {
+                int radiusChunks = cfg.planning().dynamicPlanEnabled()
+                        ? cfg.planning().dynamicPlanRadiusChunks()
+                        : cfg.planning().initialPlanRadiusChunks();
+                return Math.max(1, radiusChunks) * 16;
+            }
+        } catch (Throwable t) {
+            return 256 * 16;
+        }
+    }
+
+    private void openContextMenuFor(BlockPos target, int x, int y) {
+        contextMenu.clearItems();
+        contextMenu.addItem(MENU_TELEPORT, () -> onTeleportTo(target));
+        contextMenu.addSeparator();
+        contextMenu.addItem(MENU_SET_ALIAS, () -> openAliasDialog(target));
+        contextMenu.addItem(MENU_EDIT_NOTE, () -> openNoteEditor(target));
+        contextMenu.open(x, y);
+    }
+
+    /** 打开别名设置对话�?*/
+    private void openAliasDialog(BlockPos target) {
+        if (this.minecraft == null) return;
+        String currentAlias = ClientMapNotes.getAlias(target);
+        this.minecraft.gui.setScreen(new SimpleTextInputScreen(
+                DIALOG_ALIAS_TITLE,
+                currentAlias != null ? currentAlias : "",
+                alias -> ClientMapNotes.setAlias(target, alias),
+                this  // 返回地图界面
+        ));
+    }
+
+    /** 打开笔记编辑器（书与笔风格） */
+    private void openNoteEditor(BlockPos target) {
+        if (this.minecraft == null) return;
+        this.minecraft.gui.setScreen(new NoteEditScreen(target, this));
+    }
+
+    private int[] computeConfigBtnBounds() {
+        int x = mapX + MapTheme.INNER_PADDING + 4;
+        int y = mapY + MapTheme.INNER_PADDING + 4;
+        int w = this.font.width(BTN_CONFIG) + 6;
+        int h = this.font.lineHeight + 4;
+        return new int[]{x, y, w, h};
+    }
+
+    private int[] computeManualBtnBounds() {
+        Component lbl = Component.empty().append(BTN_MANUAL).append(": ")
+                .append(Component.translatable("gui.roadweaver.common.on"));
+        int w = this.font.width(lbl) + 6;
+        int h = this.font.lineHeight + 4;
+        int x = mapX + MapTheme.INNER_PADDING + 4;
+        int y = mapY + mapH - MapTheme.INNER_PADDING - 4 - h;
+        return new int[]{x, y, w, h};
+    }
+
+    private boolean insideRect(double x, double y, int[] bounds) {
+        return x >= bounds[0] && x <= bounds[0] + bounds[2] 
+            && y >= bounds[1] && y <= bounds[1] + bounds[3];
+    }
+
+    private boolean insideRect(double x, double y, int rx, int ry, int rw, int rh) {
+        return x >= rx && x <= rx + rw && y >= ry && y <= ry + rh;
+    }
+
+    private boolean hasMapOpenPermission() {
+        Minecraft mc = this.minecraft;
+        if (mc == null) {
+            return true;
+        }
+        if (!ClientMapAccessGuard.isAllowedOrUnknown()) {
+            return false;
+        }
+        MinecraftServer server = mc.getSingleplayerServer();
+        if (server == null || mc.player == null) {
+            return true;
+        }
+        ServerPlayer serverPlayer = server.getPlayerList().getPlayer(mc.player.getUUID());
+        return serverPlayer == null || MapAccessService.canOpenMap(serverPlayer);
+    }
+
+    private void denyMapAccessAndClose() {
+        ClientMapAccessGuard.notifyDenied(this.minecraft);
+        MapSnapshotCache.clearNow();
+        this.onClose();
+    }
+}

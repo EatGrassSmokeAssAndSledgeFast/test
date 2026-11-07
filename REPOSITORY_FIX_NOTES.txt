@@ -1,0 +1,20 @@
+RoadWeaver 26.3 Fabric-only build repository fix
+
+The Gradle plugin classpath failed before Java compilation because Architectury Loom's
+transitive tooling artifacts were not available from the configured plugin repositories.
+
+Added repositories to settings.gradle:
+- https://repo.glaremasters.me/repository/public/  (de.oceanlabs.mcp:mcinjector:3.8.0)
+- https://maven.mcmoddev.com/                    (net.minecraftforge:DiffPatch:2.0.7)
+
+These repositories are included in pluginManagement.repositories, which is the important
+location for resolving Loom's transitive plugin-classpath dependencies. They are also
+included in dependencyResolutionManagement.repositories as a fallback for regular project
+dependencies.
+
+No Minecraft source files, Fabric code, or mod behavior were changed in this revision.
+
+Build with JDK 25:
+  .\\gradlew.bat clean build
+
+This source package has not been compiled in this environment, which only has JDK 21.

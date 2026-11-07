@@ -1,0 +1,44 @@
+package net.shiroha233.roadweaver.features.config;
+
+import net.fabricmc.fabric.api.biome.v1.BiomeModifications;
+import net.fabricmc.fabric.api.biome.v1.BiomeSelectors;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.level.levelgen.GenerationStep;
+import net.minecraft.world.level.levelgen.placement.PlacedFeature;
+import net.shiroha233.roadweaver.RoadWeaver;
+import net.shiroha233.roadweaver.features.highway.HighwayFeature;
+import net.shiroha233.roadweaver.features.path.PathFeature;
+
+/**
+ * Fabric Feature 注册
+ */
+public final class RoadFeatureRegistry {
+    private RoadFeatureRegistry() {}
+
+    public static void register() {
+        Registry.register(BuiltInRegistries.FEATURE_TYPE,
+                Identifier.fromNamespaceAndPath(RoadWeaver.MOD_ID, "road_feature"), PathFeature.CODEC);
+        Registry.register(BuiltInRegistries.FEATURE_TYPE,
+                Identifier.fromNamespaceAndPath(RoadWeaver.MOD_ID, "highway_feature"), HighwayFeature.CODEC);
+
+        ResourceKey<PlacedFeature> placedKey = ResourceKey.create(
+                Registries.PLACED_FEATURE,
+                Identifier.fromNamespaceAndPath(RoadWeaver.MOD_ID, "road_feature_placed"));
+        BiomeModifications.addFeature(
+                BiomeSelectors.all(),
+                GenerationStep.Decoration.TOP_LAYER_MODIFICATION,
+                placedKey);
+
+        ResourceKey<PlacedFeature> highwayPlacedKey = ResourceKey.create(
+                Registries.PLACED_FEATURE,
+                Identifier.fromNamespaceAndPath(RoadWeaver.MOD_ID, "highway_feature_placed"));
+        BiomeModifications.addFeature(
+                BiomeSelectors.all(),
+                GenerationStep.Decoration.TOP_LAYER_MODIFICATION,
+                highwayPlacedKey);
+    }
+}
