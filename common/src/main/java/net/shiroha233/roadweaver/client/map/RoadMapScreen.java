@@ -56,6 +56,11 @@ public class RoadMapScreen extends RoadWeaverScreen implements MapInputHandler.C
     // 数据
     private MapSnapshot snapshot = MapSnapshot.empty();
     private Identifier currentDimensionId;
+    private Identifier snapshotCoverageDimensionId;
+    private Identifier requestedSnapshotDimensionId;
+    private boolean snapshotCoverageValid;
+    private int snapshotCoverageMinX, snapshotCoverageMinZ, snapshotCoverageMaxX, snapshotCoverageMaxZ;
+    private int requestedSnapshotMinX, requestedSnapshotMinZ, requestedSnapshotMaxX, requestedSnapshotMaxZ;
     
     // 组件
     private final MapState state = new MapState();
@@ -418,12 +423,25 @@ public class RoadMapScreen extends RoadWeaverScreen implements MapInputHandler.C
         Identifier dimensionId = (mc.level != null) ? mc.level.dimension().identifier() : null;
         if (dimensionId != null && (currentDimensionId == null || !dimensionId.equals(currentDimensionId))) {
             currentDimensionId = dimensionId;
+            snapshotCoverageValid = false;
+            snapshotCoverageDimensionId = dimensionId;
             MapSnapshot cached = MapSnapshotCache.peek(currentDimensionId);
             if (cached != null) {
                 this.snapshot = cached;
             }
         }
-        
+        if (dimensionId != null && snapshotCoverageValid
+                && dimensionId.equals(snapshotCoverageDimensionId)
+                && minX >= snapshotCoverageMinX && minZ >= snapshotCoverageMinZ
+                && maxX <= snapshotCoverageMaxX && maxZ <= snapshotCoverageMaxZ) {
+            return;
+        }
+        requestedSnapshotMinX = minX;
+        requestedSnapshotMinZ = minZ;
+        requestedSnapshotMaxX = maxX;
+        requestedSnapshotMaxZ = maxZ;
+        requestedSnapshotDimensionId = dimensionId;
+
         MinecraftServer server = mc.getSingleplayerServer();
         if (server != null) {
             // 单人模式：本地构造快�?
@@ -456,6 +474,7 @@ public class RoadMapScreen extends RoadWeaverScreen implements MapInputHandler.C
             // 多人模式：发送网络请�?
             int requestSeq = state.incrementAndGetRequestSeq();
             Identifier did = (mc.level != null) ? mc.level.dimension().identifier() : Identifier.fromNamespaceAndPath("minecraft", "overworld");
+            requestedSnapshotDimensionId = did;
             ClientNetBridge.requestSnapshot(requestSeq, did, minX, minZ, maxX, maxZ);
         }
     }
@@ -524,6 +543,14 @@ public class RoadMapScreen extends RoadWeaverScreen implements MapInputHandler.C
         boolean shouldRefitView = !hasSnapshotData(this.snapshot) && hasSnapshotData(snapshot);
         this.snapshot = snapshot;
         MapSnapshotCache.put(dimensionId, snapshot);
+        if (dimensionId.equals(requestedSnapshotDimensionId)) {
+            snapshotCoverageDimensionId = dimensionId;
+            snapshotCoverageMinX = requestedSnapshotMinX;
+            snapshotCoverageMinZ = requestedSnapshotMinZ;
+            snapshotCoverageMaxX = requestedSnapshotMaxX;
+            snapshotCoverageMaxZ = requestedSnapshotMaxZ;
+            snapshotCoverageValid = true;
+        }
         if (shouldRefitView) {
             initializeView(this.minecraft);
         }

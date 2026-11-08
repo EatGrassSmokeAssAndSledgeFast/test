@@ -8,6 +8,7 @@ import net.shiroha233.roadweaver.config.ConfigService;
 import net.shiroha233.roadweaver.config.ModConfig;
 import net.shiroha233.roadweaver.config.sub.RoadGenerationConfig;
 import net.shiroha233.roadweaver.core.model.ConnectionStatus;
+import net.shiroha233.roadweaver.core.model.RoadData;
 import net.shiroha233.roadweaver.core.model.StructureConnection;
 import net.shiroha233.roadweaver.features.highway.config.HighwayGenerationConfig;
 import net.shiroha233.roadweaver.features.highway.generation.HighwayRoad;
@@ -20,6 +21,9 @@ import net.shiroha233.roadweaver.planning.RoadPlanningService;
 import net.shiroha233.roadweaver.postprocess.RoadSnapService;
 import net.shiroha233.roadweaver.runtime.ThreadPoolManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -30,6 +34,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 閬撹矾鐢熸垚璋冨害鍣紝绠＄悊 Path/Highway 鍙岄槦鍒楃殑 tick 椹卞姩寮傛鐢熸垚
  */
 public final class RoadGenerationService {
+    private static final Logger LOGGER = LoggerFactory.getLogger("roadweaver");
+
     private RoadGenerationService() {}
 
     private static final ConcurrentHashMap<ServerLevel, ConcurrentLinkedQueue<StructureConnection>> QUEUES = new ConcurrentHashMap<>();
@@ -135,9 +141,22 @@ public final class RoadGenerationService {
             if (!modCfg.roadsEnabledForDimension(dimId)) return true;
 
             RoadGenerationConfig genCfg = RoadGenerationConfig.from(modCfg);
-            new Road(level, conn, cfg, genCfg).generateRoad(modCfg.pathfindingCost().aStarMaxSteps());
+            long startedAtNanos = System.nanoTime();
+            RoadData roadData = new Road(level, conn, cfg, genCfg)
+                    .generateRoad(modCfg.pathfindingCost().aStarMaxSteps());
+            long elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L;
+            if (roadData == null) {
+                LOGGER.warn("Path generation produced no road data for {} -> {} after {} ms",
+                        conn.from(), conn.to(), elapsedMs);
+                return false;
+            }
+            int segmentCount = roadData.roadSegmentList() == null ? 0 : roadData.roadSegmentList().size();
+            int spanCount = roadData.spans() == null ? 0 : roadData.spans().size();
+            LOGGER.info("Path generated {} -> {} in {} ms ({} segments, {} spans)",
+                    conn.from(), conn.to(), elapsedMs, segmentCount, spanCount);
             return true;
         } catch (Throwable t) {
+            LOGGER.error("Unexpected error while generating path {} -> {}", conn.from(), conn.to(), t);
             return false;
         }
     }
@@ -151,7 +170,12 @@ public final class RoadGenerationService {
             if (!cfg.highwayEnabledForDimension(dimId)) return true;
 
             HighwayGenerationConfig genCfg = HighwayGenerationConfig.from(cfg);
-            return new HighwayRoad(level, conn, genCfg).generateRoad(cfg.highway().aStarMaxSteps());
+            long startedAtNanos = System.nanoTime();
+            boolean generated = new HighwayRoad(level, conn, genCfg).generateRoad(cfg.highway().aStarMaxSteps());
+            long elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L;
+            LOGGER.info("Highway generation {} -> {} finished in {} ms (success={})",
+                    conn.from(), conn.to(), elapsedMs, generated);
+            return generated;
         } catch (Throwable t) {
             return false;
         }

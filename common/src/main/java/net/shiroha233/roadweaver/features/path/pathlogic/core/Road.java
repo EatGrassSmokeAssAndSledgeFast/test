@@ -23,6 +23,9 @@ import net.shiroha233.roadweaver.persistence.sharded.RoadShardStorage;
 import net.shiroha233.roadweaver.planning.PlanningUtils;
 import net.shiroha233.roadweaver.structures.precompute.RoadsideStructurePrecomputer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +35,7 @@ import java.util.Map;
  * 负责生成普通道路并写入持久化道路数据。
  */
 public final class Road {
+    private static final Logger LOGGER = LoggerFactory.getLogger("roadweaver");
     private final ServerLevel level;
     private final StructureConnection connection;
     private final PathFeatureConfig featureConfig;
@@ -85,6 +89,7 @@ public final class Road {
         BlockPos rawEnd = connection.to();
         TerrainSamplingCache cache = new TerrainSamplingCache();
         try {
+            long pathStartedAtNanos = System.nanoTime();
             PathCalculationResult pathResult = RoadPathCalculator.calculateAStarRoadPathDetailed(
                     rawStart,
                     rawEnd,
@@ -93,6 +98,10 @@ public final class Road {
                     maxSteps,
                     cache,
                     generationConfig);
+            long pathElapsedMs = (System.nanoTime() - pathStartedAtNanos) / 1_000_000L;
+            int rawSegmentCount = pathResult.segments() == null ? 0 : pathResult.segments().size();
+            LOGGER.info("Path search {} -> {} took {} ms ({} raw segments)",
+                    rawStart, rawEnd, pathElapsedMs, rawSegmentCount);
             if (Thread.currentThread().isInterrupted()) {
                 return null;
             }
@@ -120,6 +129,9 @@ public final class Road {
                     cache,
                     terrain,
                     generationConfig.bridgeMinWaterDepth());
+            if (containsUnbridgedWater(segments, spans, level, cache)) {
+                return null;
+            }
             List<Integer> targetY = computeTargetY(segments, spans);
             if (Thread.currentThread().isInterrupted()) {
                 return null;
@@ -146,6 +158,35 @@ public final class Road {
         } finally {
             cache.clear();
         }
+    }
+
+    private static boolean containsUnbridgedWater(List<RoadSegmentPlacement> segments,
+                                                  List<RoadSpan> spans,
+                                                  ServerLevel level,
+                                                  TerrainSamplingCache cache) {
+        Map<Long, Integer> indexByCenter = new HashMap<>();
+        for (int i = 0; i < segments.size(); i++) {
+            indexByCenter.put(segments.get(i).middlePos().asLong(), i);
+        }
+        boolean[] bridgeMask = new boolean[segments.size()];
+        if (spans != null) {
+            for (RoadSpan span : spans) {
+                if (span.type() != SpanType.BRIDGE) continue;
+                Integer a = indexByCenter.get(span.start().asLong());
+                Integer b = indexByCenter.get(span.end().asLong());
+                if (a == null || b == null) continue;
+                int first = Math.max(0, Math.min(a, b));
+                int last = Math.min(segments.size() - 1, Math.max(a, b));
+                for (int i = first; i <= last; i++) bridgeMask[i] = true;
+            }
+        }
+        for (int i = 0; i < segments.size(); i++) {
+            if (bridgeMask[i]) continue;
+            for (BlockPos pos : segments.get(i).positions()) {
+                if (cache.isColumnWater(level, pos.getX(), pos.getZ())) return true;
+            }
+        }
+        return false;
     }
 
     private static int getRandomWidth(RandomSource random, PathFeatureConfig config) {

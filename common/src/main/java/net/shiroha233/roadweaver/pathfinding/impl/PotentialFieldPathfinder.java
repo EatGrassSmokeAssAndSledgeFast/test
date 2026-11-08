@@ -85,7 +85,7 @@ public final class PotentialFieldPathfinder implements Pathfinder {
                 Node current = openSet.poll();
                 if (current == null) break;
 
-                if (manhattan2d(current.pos, end) < (int) (d * RoadConstants.POTENTIAL_FIELD_SUCCESS_DISTANCE_FACTOR)) {
+                if (current.pos.getX() == end.getX() && current.pos.getZ() == end.getZ()) {
                     return reconstructRawPath(current);
                 }
 
@@ -102,6 +102,7 @@ public final class PotentialFieldPathfinder implements Pathfinder {
                     BlockPos nxz = current.pos.offset(off[0], 0, off[1]);
                     if (nxz.getX() < minX || nxz.getX() > maxX || nxz.getZ() < minZ || nxz.getZ() > maxZ) continue;
                     if (!terrain.contains(nxz.getX(), nxz.getZ())) continue;
+                    if (terrain.crossesOcean(current.pos.getX(), current.pos.getZ(), nxz.getX(), nxz.getZ())) continue;
 
                     int y = heightSampler(terrain, nxz.getX(), nxz.getZ());
                     BlockPos np = new BlockPos(nxz.getX(), y, nxz.getZ());
@@ -109,7 +110,7 @@ public final class PotentialFieldPathfinder implements Pathfinder {
 
                     double moveCost = computeMoveCost(
                             current.pos, np, nxz, off, d,
-                            grad, gradMag, contour,
+                            start, end, grad, gradMag, contour,
                             terrain, cfg);
 
                     double tentativeG = current.g + moveCost;
@@ -134,6 +135,7 @@ public final class PotentialFieldPathfinder implements Pathfinder {
 
     private double computeMoveCost(BlockPos current, BlockPos np, BlockPos nxz,
                                    int[] off, int d,
+                                   BlockPos start, BlockPos end,
                                    double[] grad, double gradMag, double[] contour,
                                    PathTerrainField terrain,
                                    PathfindingCostConfig cfg) {
@@ -191,6 +193,8 @@ public final class PotentialFieldPathfinder implements Pathfinder {
                     + waterDepth * (double) waterDepth * cfg.waterDepthWeight() * 2.0;
         }
         double nearWaterPenalty = nearWater ? (cfg.nearWaterCost() * 3.0) : 0.0;
+        double deviationCost = deviationFromDirectLine(np, start, end)
+                * cfg.deviationWeight() / Math.max(1, d);
 
         return adjustedBase
                 + gradePenalty
@@ -199,7 +203,17 @@ public final class PotentialFieldPathfinder implements Pathfinder {
                 + stabilityCost * cfg.stabilityWeight()
                 + biomeCost * cfg.biomeWeight()
                 + waterPenalty
-                + nearWaterPenalty;
+                + nearWaterPenalty
+                + deviationCost;
+    }
+
+    private static double deviationFromDirectLine(BlockPos point, BlockPos start, BlockPos end) {
+        double ax = start.getX(), az = start.getZ();
+        double bx = end.getX(), bz = end.getZ();
+        double dx = bx - ax, dz = bz - az;
+        double length = Math.hypot(dx, dz);
+        if (length < 1.0e-6) return 0.0;
+        return Math.abs(dz * point.getX() - dx * point.getZ() + bx * az - bz * ax) / length;
     }
 
     private List<RoadSegmentPlacement> reconstructPath(List<BlockPos> rawPath, int width,

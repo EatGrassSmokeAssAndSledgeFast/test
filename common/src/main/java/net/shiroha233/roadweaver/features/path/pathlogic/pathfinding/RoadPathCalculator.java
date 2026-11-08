@@ -3,6 +3,7 @@ package net.shiroha233.roadweaver.features.path.pathlogic.pathfinding;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.BiomeTags;
 import net.shiroha233.roadweaver.config.sub.PathfindingCostConfig;
 import net.shiroha233.roadweaver.config.sub.RoadGenerationConfig;
 import net.shiroha233.roadweaver.core.model.RoadSegmentPlacement;
@@ -123,7 +124,27 @@ public final class RoadPathCalculator {
                 net.shiroha233.roadweaver.core.constants.RoadConstants.DEFAULT_BRIDGE_MIN_WATER_DEPTH,
                 net.shiroha233.roadweaver.pathfinding.impl.SplineHelper.CurveMode.CATMULL_ROM,
                 accurate);
-        return segments == null ? PathCalculationResult.failure() : new PathCalculationResult(segments, terrain);
+        if (segments == null || segments.isEmpty() || touchesOceanBiome(segments, level, cache)) {
+            return PathCalculationResult.failure();
+        }
+        return new PathCalculationResult(segments, terrain);
+    }
+
+    private static boolean touchesOceanBiome(List<RoadSegmentPlacement> segments,
+                                             ServerLevel level,
+                                             TerrainSamplingCache cache) {
+        for (RoadSegmentPlacement segment : segments) {
+            BlockPos center = segment.middlePos();
+            if (isOcean(cache.getBiome(level, center.getX(), center.getZ()))) return true;
+            for (BlockPos pos : segment.positions()) {
+                if (isOcean(cache.getBiome(level, pos.getX(), pos.getZ()))) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isOcean(net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome> biome) {
+        return biome != null && (biome.is(BiomeTags.IS_OCEAN) || biome.is(BiomeTags.IS_DEEP_OCEAN));
     }
 
     static int heightSampler(TerrainSamplingCache cache, int x, int z, ServerLevel level) {

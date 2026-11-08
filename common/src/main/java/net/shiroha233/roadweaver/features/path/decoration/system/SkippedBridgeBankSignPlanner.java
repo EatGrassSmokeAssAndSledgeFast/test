@@ -2,6 +2,7 @@ package net.shiroha233.roadweaver.features.path.decoration.system;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
+import net.minecraft.tags.BiomeTags;
 import net.minecraft.world.level.WorldGenLevel;
 import net.shiroha233.roadweaver.features.path.decoration.base.Decoration;
 import net.shiroha233.roadweaver.features.path.decoration.types.SeaQuestionSignDecoration;
@@ -31,6 +32,7 @@ public final class SkippedBridgeBankSignPlanner {
         boolean beforeSkip = (i + 1 < skipSegments.length) && skipSegments[i + 1];
         boolean afterSkip = (i - 1 >= 0) && skipSegments[i - 1];
         if (!beforeSkip && !afterSkip) return;
+        if (!isOcean(world, placePos) && !isOcean(world, nextPos) && !isOcean(world, prevPos)) return;
 
         int dx = nextPos.getX() - prevPos.getX();
         int dz = nextPos.getZ() - prevPos.getZ();
@@ -50,5 +52,10 @@ public final class SkippedBridgeBankSignPlanner {
 
         if (StructureAvoidanceService.shouldAvoid(world, shifted)) return;
         out.add(new SeaQuestionSignDecoration(shifted, ortho, world, isStart));
+    }
+
+    private static boolean isOcean(WorldGenLevel world, BlockPos pos) {
+        var biome = world.getBiome(pos);
+        return biome.is(BiomeTags.IS_OCEAN) || biome.is(BiomeTags.IS_DEEP_OCEAN);
     }
 }

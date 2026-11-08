@@ -123,6 +123,7 @@ public final class BidirectionalAStarPathfinder implements Pathfinder {
             if (Thread.currentThread().isInterrupted()) return null;
             BlockPos nxz = current.pos.offset(off[0], 0, off[1]);
             if (!terrain.contains(nxz.getX(), nxz.getZ())) continue;
+            if (terrain.crossesOcean(current.pos.getX(), current.pos.getZ(), nxz.getX(), nxz.getZ())) continue;
             int y = heightSampler(terrain, nxz.getX(), nxz.getZ());
             BlockPos np = new BlockPos(nxz.getX(), y, nxz.getZ());
             if (closedThis.contains(np)) continue;

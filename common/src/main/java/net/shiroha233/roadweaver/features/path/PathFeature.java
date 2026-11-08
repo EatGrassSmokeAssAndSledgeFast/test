@@ -24,6 +24,7 @@ import net.shiroha233.roadweaver.features.path.pathlogic.bridge.BridgeRangeCalcu
 import net.shiroha233.roadweaver.features.path.pathlogic.bridge.BridgeSegmentPlanner;
 import net.shiroha233.roadweaver.features.path.pathlogic.bridge.BridgeSegmentPlannerNew;
 import net.shiroha233.roadweaver.features.path.pathlogic.core.SegmentPaver;
+import net.shiroha233.roadweaver.features.path.pathlogic.core.VillagePathConnector;
 import net.shiroha233.roadweaver.features.path.pathlogic.core.StructureAvoidanceService;
 import net.shiroha233.roadweaver.features.path.pathlogic.pathfinding.BridgeTransitionAdjuster;
 import net.shiroha233.roadweaver.features.path.pathlogic.pathfinding.HeightProfileService;
@@ -32,12 +33,16 @@ import net.shiroha233.roadweaver.features.path.pathlogic.bridge.BuoyMarkerPlanne
 import net.shiroha233.roadweaver.features.path.decoration.system.SkippedBridgeBankSignPlanner;
 import net.shiroha233.roadweaver.persistence.sharded.RoadShardStorage;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.*;
 
 /**
  * 閬撹矾涓栫晫鐢熸垚 Feature
  */
 public class PathFeature implements Feature {
+    private static final Logger LOGGER = LoggerFactory.getLogger("roadweaver");
     public static final MapCodec<PathFeature> CODEC = MapCodec.unit(new PathFeature());
 
     @Override
@@ -63,6 +68,7 @@ public class PathFeature implements Feature {
         int maxX = currentChunk.getMaxBlockX();
         int maxZ = currentChunk.getMaxBlockZ();
         
+        long placementStartedAtNanos = System.nanoTime();
         List<RoadData> roadDataList = RoadShardStorage.queryRect(server, minX, minZ, maxX, maxZ);
         if (roadDataList == null || roadDataList.isEmpty())
             return false;
@@ -78,6 +84,14 @@ public class PathFeature implements Feature {
         }
         
         DecorationExecutor.tryPlaceDecorations(decorations);
+        long placementElapsedMs = (System.nanoTime() - placementStartedAtNanos) / 1_000_000L;
+        if (placementElapsedMs >= 25L) {
+            LOGGER.info("Road chunk placement {} took {} ms ({} road data records)",
+                    currentChunk, placementElapsedMs, roadDataList.size());
+        } else {
+            LOGGER.debug("Road chunk placement {} took {} ms ({} road data records)",
+                    currentChunk, placementElapsedMs, roadDataList.size());
+        }
         return true;
     }
 
@@ -161,8 +175,6 @@ public class PathFeature implements Feature {
             if (!processedMiddle.add(middle))
                 continue;
             segmentIndex++;
-            if (segmentIndex < 8 || segmentIndex > segments.size() - 8)
-                continue;
             ChunkPos middleChunk = ChunkPos.containing(middle);
             if (!middleChunk.equals(currentChunk))
                 continue;
@@ -242,5 +254,6 @@ public class PathFeature implements Feature {
                         (roadType == 0 ? DecorationPlanner.Mode.ARTIFICIAL : DecorationPlanner.Mode.NATURAL));
             }
         }
+        VillagePathConnector.connectInChunk(world, currentChunk, middlePositions);
     }
 }

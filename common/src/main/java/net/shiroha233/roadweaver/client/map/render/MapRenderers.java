@@ -15,6 +15,7 @@ import java.util.function.IntUnaryOperator;
  */
 public final class MapRenderers {
     private MapRenderers() {}
+    private static final int MAX_ROAD_SEGMENTS_PER_FRAME = 4096;
 
     public interface SegmentInView { boolean test(int x1, int z1, int x2, int z2); }
 
@@ -90,10 +91,13 @@ public final class MapRenderers {
                                            int color,
                                            int left, int top, int right, int bottom,
                                            int lodStepBlocks) {
+        int renderedSegments = 0;
         for (List<BlockPos> pl : polylines) {
+            if (renderedSegments >= MAX_ROAD_SEGMENTS_PER_FRAME) return;
             if (pl == null || pl.size() < 2) continue;
             BlockPos keep = pl.get(0);
             for (int i = 1; i < pl.size(); i++) {
+                if (renderedSegments >= MAX_ROAD_SEGMENTS_PER_FRAME) return;
                 BlockPos curr = pl.get(i);
                 int dx = curr.getX() - keep.getX();
                 int dz = curr.getZ() - keep.getZ();
@@ -111,6 +115,7 @@ public final class MapRenderers {
                     int x2 = toScreenX.applyAsInt(x2w);
                     int y2 = toScreenY.applyAsInt(z2w);
                     RenderUtils.drawThickLine(g, x1, y1, x2, y2, color, thickness, left, top, right, bottom);
+                    if (++renderedSegments >= MAX_ROAD_SEGMENTS_PER_FRAME) return;
                 }
                 keep = curr;
             }
@@ -126,6 +131,7 @@ public final class MapRenderers {
                     int x2 = toScreenX.applyAsInt(x2w);
                     int y2 = toScreenY.applyAsInt(z2w);
                     RenderUtils.drawThickLine(g, x1, y1, x2, y2, color, thickness, left, top, right, bottom);
+                    if (++renderedSegments >= MAX_ROAD_SEGMENTS_PER_FRAME) return;
                 }
             }
         }

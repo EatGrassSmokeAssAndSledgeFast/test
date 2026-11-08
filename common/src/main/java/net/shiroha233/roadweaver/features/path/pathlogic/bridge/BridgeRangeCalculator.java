@@ -71,7 +71,10 @@ public final class BridgeRangeCalculator {
         int minLength = Math.max(1, cfg.bridgeMinLength());
         int mergeGap = Math.max(1, cfg.bridgeMergeGap());
         boolean useBuoysInstead = cfg.bridgeUseBuoysInstead();
-        int maxLenBlocks = useBuoysInstead ? 0 : Math.max(0, cfg.bridgeMaxLengthBlocks());
+        int configuredMaxLength = cfg.bridgeMaxLengthBlocks();
+        int maxLenBlocks = useBuoysInstead || configuredMaxLength <= 0
+                ? 0
+                : Math.max(256, configuredMaxLength);
         
         if (spans != null) {
             Map<Long, Integer> indexMap = new HashMap<>();

@@ -23,7 +23,7 @@ import net.shiroha233.roadweaver.runtime.ThreadPoolManager;
 import java.util.List;
 
 /**
- * Fabric 服务端规划钩子
+ * Fabric server planning hooks.
  */
 public final class ServerPlanningHooks {
     private ServerPlanningHooks() {}
@@ -36,15 +36,15 @@ public final class ServerPlanningHooks {
             ThreadPoolManager.onServerStarted(server);
             SignTextService.clearPending();
             IdleRoadGenerationService.onServerStarted();
-            
+
             ServerLevel level = server.getLevel(Level.OVERWORLD);
             if (level == null) return;
 
             StructureDiscoveryService.discoverFromLevel(level);
+            RoadGenerationService.onServerStarted();
 
             boolean dedicated = server.isDedicatedServer();
             if (dedicated) {
-                RoadGenerationService.onServerStarted();
                 boolean highwayMode = ConfigService.get().highway().enabled();
                 if (highwayMode) {
                     HighwayPlanningService.initialPlanAsync(level);
@@ -53,14 +53,12 @@ public final class ServerPlanningHooks {
                 }
                 return;
             }
-            
+
             List<StructureConnection> conns = WorldDataProvider.getInstance().getStructureConnections(level);
             if (conns == null || conns.isEmpty()) {
-                RoadGenerationService.onServerStarted();
+                // Plan initial links, but let the regular server-tick generation queue
+                // process them after the integrated server has started ticking.
                 InitialGenManager.begin(level);
-                InitialGenManager.blockUntilDone(level);
-            } else {
-                RoadGenerationService.onServerStarted();
             }
 
             if (ConfigService.get().highway().enabled()) {
@@ -95,8 +93,11 @@ public final class ServerPlanningHooks {
             }
 
             ServerLevel overworld = server.getLevel(Level.OVERWORLD);
-            if (overworld != null && ConfigService.get().highway().enabled()) {
-                HighwayCellPathPlanningService.tick(overworld);
+            if (overworld != null) {
+                if (ConfigService.get().highway().enabled()) {
+                    HighwayCellPathPlanningService.tick(overworld);
+                }
+                InitialGenManager.update(overworld);
             }
         });
 

@@ -37,6 +37,26 @@ public interface PathTerrainField {
                 || biomeHolder.is(BiomeTags.IS_DEEP_OCEAN));
     }
 
+    default boolean isOceanBiome(int x, int z) {
+        if (!contains(x, z)) return false;
+        var holder = biome(x, z);
+        return holder != null && (holder.is(BiomeTags.IS_OCEAN) || holder.is(BiomeTags.IS_DEEP_OCEAN));
+    }
+
+    default boolean crossesOcean(int fromX, int fromZ, int toX, int toZ) {
+        int dx = toX - fromX;
+        int dz = toZ - fromZ;
+        int distance = Math.max(Math.abs(dx), Math.abs(dz));
+        int samples = Math.max(1, (distance + 3) / 4);
+        for (int i = 0; i <= samples; i++) {
+            double t = (double) i / samples;
+            int x = (int) Math.round(fromX + dx * t);
+            int z = (int) Math.round(fromZ + dz * t);
+            if (isOceanBiome(x, z)) return true;
+        }
+        return false;
+    }
+
     default int waterDepth(int x, int z) {
         return Math.max(0, height(x, z) - oceanFloor(x, z));
     }

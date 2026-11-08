@@ -89,7 +89,7 @@ public final class StructureRoadOffsetService {
         StructureCategory cat = detectCategory(level, endpoint);
         var cfg = ConfigService.get();
         return switch (cat) {
-            case VILLAGE -> cfg.villageRoadOffset();
+            case VILLAGE -> Math.min(cfg.villageRoadOffset(), 16);
             case OTHER -> cfg.otherStructureRoadOffset();
             default -> 0;
         };

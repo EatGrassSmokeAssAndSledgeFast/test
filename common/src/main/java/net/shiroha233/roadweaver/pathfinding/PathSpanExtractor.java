@@ -88,8 +88,9 @@ public final class PathSpanExtractor {
                                          AccurateHeightSampler accurate,
                                          BlockPos pos,
                                          int minWaterDepth) {
-        if (terrain != null && terrain.contains(pos.getX(), pos.getZ())) {
-            return terrain.isBridgeWater(pos.getX(), pos.getZ(), minWaterDepth);
+        if (terrain != null && terrain.contains(pos.getX(), pos.getZ())
+                && terrain.isBridgeWater(pos.getX(), pos.getZ(), minWaterDepth)) {
+            return true;
         }
         if (!isWaterLike(cache, pos.getX(), pos.getZ(), level)) {
             return false;

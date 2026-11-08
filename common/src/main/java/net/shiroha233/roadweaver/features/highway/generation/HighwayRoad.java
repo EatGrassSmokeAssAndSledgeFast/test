@@ -20,6 +20,9 @@ import net.shiroha233.roadweaver.pathfinding.cache.TerrainSamplingCache;
 import net.shiroha233.roadweaver.pathfinding.terrain.PathTerrainField;
 import net.shiroha233.roadweaver.persistence.sharded.RoadShardStorage;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -29,6 +32,7 @@ import java.util.Map;
  * 负责生成高速公路道路数据并写入持久化存储。
  */
 public final class HighwayRoad {
+    private static final Logger LOGGER = LoggerFactory.getLogger("roadweaver");
     private final ServerLevel level;
     private final StructureConnection connection;
     private final HighwayGenerationConfig generationConfig;
@@ -59,6 +63,7 @@ public final class HighwayRoad {
         TerrainSamplingCache cache = new TerrainSamplingCache();
         try {
             RoadGenerationConfig adaptedConfig = generationConfig.toRoadGenerationConfig();
+            long pathStartedAtNanos = System.nanoTime();
             PathCalculationResult pathResult = HighwayPathCalculator.calculateHighwayPathDetailed(
                     rawStart,
                     rawEnd,
@@ -67,6 +72,10 @@ public final class HighwayRoad {
                     Math.max(1, maxSteps),
                     cache,
                     generationConfig);
+            long pathElapsedMs = (System.nanoTime() - pathStartedAtNanos) / 1_000_000L;
+            int rawSegmentCount = pathResult.segments() == null ? 0 : pathResult.segments().size();
+            LOGGER.info("Highway path search {} -> {} took {} ms ({} raw segments)",
+                    rawStart, rawEnd, pathElapsedMs, rawSegmentCount);
             if (Thread.currentThread().isInterrupted()) {
                 return false;
             }

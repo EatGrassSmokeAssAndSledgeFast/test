@@ -74,7 +74,7 @@ public final class BasicAStarPathfinder implements Pathfinder {
                 Node current = openSet.poll();
                 if (current == null) break;
 
-                if (manhattan2d(current.pos, end) < d * 2) {
+                if (current.pos.getX() == end.getX() && current.pos.getZ() == end.getZ()) {
                     return reconstructRawPath(current);
                 }
 
@@ -85,6 +85,7 @@ public final class BasicAStarPathfinder implements Pathfinder {
                     if (Thread.currentThread().isInterrupted()) return null;
                     BlockPos nxz = current.pos.offset(off[0], 0, off[1]);
                     if (!terrain.contains(nxz.getX(), nxz.getZ())) continue;
+                    if (terrain.crossesOcean(current.pos.getX(), current.pos.getZ(), nxz.getX(), nxz.getZ())) continue;
                     int y = heightSampler(terrain, nxz.getX(), nxz.getZ());
                     BlockPos np = new BlockPos(nxz.getX(), y, nxz.getZ());
                     if (closed.contains(np)) continue;

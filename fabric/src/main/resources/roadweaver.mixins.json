@@ -5,7 +5,6 @@
   "compatibilityLevel": "JAVA_25",
   "plugin": "net.shiroha233.roadweaver.mixin.MixinConfigPlugin",
   "mixins": [
-    "fabric.MinecraftServerMixin",
     "fabric.GenericVegetationFeatureMixin",
     "fabric.ServerLevelStructureMixin",
     "fabric.PlayerDimensionChangeMixin",
